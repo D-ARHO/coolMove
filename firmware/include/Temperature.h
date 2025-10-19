@@ -6,10 +6,10 @@
 #include <Arduino.h>
 
 class TemperatureSensor {
-  private:
+private:
     OneWire oneWire;
     DallasTemperature sensors;
-  public:
+public:
     TemperatureSensor(uint8_t pin);
     void begin();
     float readCelsius();

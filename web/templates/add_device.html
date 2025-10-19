@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}Add New Device - CoolMove{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card shadow-lg">
+            <div class="card-header bg-info text-white">
+                <h4 class="mb-0"><i class="fas fa-truck-loading"></i> Register New CoolMove Device</h4>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">Enter the name and the **full, 15-digit IMEI number** from your SIM7600 module.</p>
+                
+                <form method="POST" action="{{ url_for('add_device') }}">
+                    
+                    <div class="mb-3">
+                        <label for="device_name" class="form-label">Device Name (e.g., 'Truck A', 'Cooler Unit 1')</label>
+                        <input type="text" class="form-control" id="device_name" name="device_name" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="unique_imei" class="form-label">Unique IMEI Number (15 Digits)</label>
+                        <input type="text" class="form-control" id="unique_imei" name="unique_imei" 
+                               pattern="[0-9]{15}" maxlength="15" required 
+                               title="IMEI must be a 15-digit number.">
+                        <div class="form-text">This is critical for linking sensor data to your account.</div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-info w-100">Register Device</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

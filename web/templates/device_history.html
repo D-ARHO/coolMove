@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block title %}History | {{ device.device_name }}{% endblock %}
+
+{% block head_extras %}
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+          crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20n6a9c3365I501p17LhXhYcM9S9Wc5t6U5t8P5t7Wc="
+            crossorigin=""></script>
+    <style>
+        #route-map { height: 600px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+    </style>
+{% endblock %}
+
+{% block content %}
+<h1 class="mb-4">Historical Route: <span class="text-primary">{{ device.device_name }}</span></h1>
+<p class="text-muted">Viewing the last 50 data points received.</p>
+
+<div class="card shadow mb-4">
+    <div class="card-header bg-light">
+        <h5 class="mb-0"><i class="fas fa-route"></i> Tracking Map</h5>
+    </div>
+    <div class="card-body">
+        
+        {% if route_data_json and route_data_json != '[]' %}
+            
+            <div class="row mb-4 text-center" id="data-summary">
+                <p class="text-info">Loading data summary...</p>
+            </div>
+            
+            <div id="route-map"></div>
+
+        {% else %}
+            <div class="alert alert-warning text-center">
+                No historical data available to display the route for this device.
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Data is passed as a JSON string from Flask, and parsed safely here in JavaScript
+        const routeData = JSON.parse('{{ route_data_json | safe }}');
+
+        if (routeData.length > 0) {
+            const startPoint = routeData[0];
+            const endPoint = routeData[routeData.length - 1];
+
+            // 1. Update the Data Summary Section using JS
+            const summaryHtml = `
+                <div class="col-md-4">
+                    <p class="mb-0 text-muted">Current Temp</p>
+                    <h4 class="fw-bold ${endPoint.temp > 30.0 ? 'text-danger' : 'text-info'}">${endPoint.temp.toFixed(1)}°C</h4>
+                </div>
+                <div class="col-md-4">
+                    <p class="mb-0 text-muted">Points Tracked</p>
+                    <h4 class="fw-bold text-success">${routeData.length}</h4>
+                </div>
+                <div class="col-md-4">
+                    <p class="mb-0 text-muted">Latest Time</p>
+                    <h4 class="fw-bold">${endPoint.time}</h4>
+                </div>
+            `;
+            document.getElementById('data-summary').innerHTML = summaryHtml;
+
+
+            // 2. Initialize Map
+            const map = L.map('route-map').setView([endPoint.lat, endPoint.lon], 13); 
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+
+            // 3. Draw Route Line
+            const latlngs = routeData.map(p => [p.lat, p.lon]);
+            L.polyline(latlngs, {color: '#007bff', weight: 4, opacity: 0.7}).addTo(map);
+
+            // 4. Start Marker (Green)
+            L.marker([startPoint.lat, startPoint.lon], {
+                icon: L.divIcon({
+                    className: 'map-start-icon', 
+                    html: '<span class="fw-bold text-white bg-success px-2 py-1 rounded shadow-sm">START</span>', 
+                    iconSize: [60, 20]
+                })
+            }).addTo(map)
+              .bindPopup(\`<b>Route Start</b><br>Temp: \${startPoint.temp.toFixed(1)}°C<br>Time: \${startPoint.time}\`);
+
+            // 5. End Marker (Current Location - Red)
+            L.marker([endPoint.lat, endPoint.lon], {
+                icon: L.divIcon({
+                    className: 'map-end-icon',
+                    html: '<span class="fw-bold text-white bg-danger px-2 py-1 rounded shadow-sm">NOW</span>',
+                    iconSize: [40, 20]
+                })
+            }).addTo(map)
+              .bindPopup(\`<b>Current Position</b><br>Temp: \${endPoint.temp.toFixed(1)}°C<br>Time: \${endPoint.time}\`)
+              .openPopup();
+            
+            // Adjust map view to fit the entire route
+            map.fitBounds(L.polyline(latlngs).getBounds());
+        }
+    });
+</script>
+
+{% endblock %}

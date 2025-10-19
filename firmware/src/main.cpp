@@ -1,69 +1,109 @@
-#include <Arduino.h>
 #include <SoftwareSerial.h>
+#include "GpsModule.h" // Assuming this is correct
+#include "GsmModule.h"
+#include "Temperature.h" // Assuming this is correct
+#include "LcdDisplay.h" // Assuming this is correct
 
-#define SIM808_RX 3  // Arduino RX <- SIM808 TX
-#define SIM808_TX 4  // Arduino TX -> SIM808 RX
+// ********************************************
+// ⚠️ IMPORTANT: UPDATE THIS LINE 
+// This IMEI must be registered to a device in your PostgreSQL database
+// ********************************************
+const char* DEVICE_IMEI = "123456789012345"; 
 
-SoftwareSerial sim808Serial(SIM808_RX, SIM808_TX); // RX, TX
+// --- PIN & CONFIG DEFINITIONS ---
+#define RX_GSM 10 
+#define TX_GSM 11 
+#define TEMP_PIN 2 
+#define LCD_ADDR 0x23 
 
-// Function declarations
-void connectGPRS();
-void sendAT(String command);
+// --- OBJECT INSTANTIATION ---
+SoftwareSerial gsmSerial(RX_GSM, TX_GSM);
+
+GpsModule gps(gsmSerial); 
+GsmModule gsm(gsmSerial); 
+
+TemperatureSensor thermometer(TEMP_PIN);
+LcdDisplay lcd(LCD_ADDR, 16, 2); 
 
 void setup() {
-  Serial.begin(9600);
-  sim808Serial.begin(9600);
-  delay(1000);
-
-  Serial.println("CoolMove: SIM808 GPRS Test");
-  connectGPRS(); // call the GPRS test function
+    Serial.begin(9600);
+    Serial.println(F("\n===================================="));
+    Serial.println(F("     CoolMove Tracker Initialized     "));
+    Serial.println(F("===================================="));
+    
+    // Initialize LCD
+    lcd.begin();
+    lcd.printLine(0, "Tracker Start...");
+    
+    // Initialize Temperature Sensor
+    thermometer.begin();
+    
+    // Initialize SIM808 module's serial port
+    gsmSerial.begin(9600);
+    delay(1000);
+    
+    // Initialize GPS 
+    gps.begin(); 
+    
+    // Initialize GSM (connect to GPRS)
+    if (gsm.begin()) {
+        String ip = gsm.getIpAddress();
+        Serial.print(F("✅ GPRS: Connected. IP: ")); 
+        Serial.println(ip);
+        lcd.printLine(1, "GPRS OK | " + ip);
+    } else {
+        Serial.println(F("⚠️ GPRS: Setup failed. Will attempt data transmission."));
+        lcd.printLine(1, "GPRS Fail (Retry)");
+    }
 }
 
 void loop() {
-  // nothing in loop, GPRS test is in setup
-}
+    Serial.println(F("\n--- LOOP START ---"));
+    
+    // 1. Get GPS Data
+    GpsData location = gps.getCoordinates(); 
+    
+    // 2. Get Temperature Data
+    float tempC = thermometer.readCelsius();
+    
+    // --- 3. Display Data Summary ---
+    Serial.print(F("[DATA] Temp: ")); Serial.print(tempC); Serial.println(F(" C"));
+    
+    // LCD Output
+    lcd.printLine(0, "T:" + String(tempC, 1) + "C | GPS: " + (location.fix ? "Y" : "N"));
+    
+    // --- 4. COMPILE AND SEND DATA ---
+    if (location.fix) { 
+        Serial.print(F("[DATA] GPS Fix OK. Lat=")); Serial.print(location.latitude, 4);
+        Serial.print(F(", Lon=")); Serial.println(location.longitude, 4);
+        
+        // Compile JSON Payload with IMEI, Lat, Lon, and Temp
+        String jsonPayload = "{";
+        jsonPayload += F("\"imei\":\""); jsonPayload += DEVICE_IMEI; jsonPayload += F("\","); 
+        jsonPayload += F("\"lat\":"); jsonPayload += String(location.latitude, 4); jsonPayload += F(",");
+        jsonPayload += F("\"lon\":"); jsonPayload += String(location.longitude, 4); jsonPayload += F(",");
+        jsonPayload += F("\"temp\":"); jsonPayload += String(tempC, 2);
+        jsonPayload += F("}");
 
-// Function definitions
-void connectGPRS() {
-  Serial.println("Setting up GPRS...");
+        // The target API endpoint on your server
+        // String apiURL = "http://webhook.site/6eb4dbb2-700a-4656-8d4f-8c56d4d5ea7f"; // Use your IP!
+        String apiURL = "http://172.17.26.216:5000/api/data"; // Use your IP!
 
-  // 1. Check module
-  sendAT("AT");
-  sendAT("AT+CSQ");        // Signal quality
-  sendAT("AT+CREG?");      // Network registration
+        Serial.print(F("TX: Payload: ")); Serial.println(jsonPayload); 
 
-  // 2. Configure GPRS
-  sendAT("AT+SAPBR=3,1,\"CONTYPE\",\"GPRS\"");
-  sendAT("AT+SAPBR=3,1,\"APN\",\"your_apn_here\""); // Replace with your SIM card APN
-
-  // 3. Open GPRS context
-  sendAT("AT+SAPBR=1,1");
-  delay(3000);
-  sendAT("AT+SAPBR=2,1"); // Check connection status
-
-  // 4. Test HTTP GET request
-  sendAT("AT+HTTPINIT");
-  sendAT("AT+HTTPPARA=\"CID\",1");
-  sendAT("AT+HTTPPARA=\"URL\",\"http://example.com\""); // Replace with a test URL
-  sendAT("AT+HTTPACTION=0"); // 0 = GET
-  delay(5000);
-  sendAT("AT+HTTPREAD");
-  sendAT("AT+HTTPTERM");
-
-  // 5. Close GPRS
-  sendAT("AT+SAPBR=0,1");
-
-  Serial.println("GPRS test finished.");
-}
-
-void sendAT(String command) {
-  sim808Serial.println(command);
-  Serial.print("> "); Serial.println(command);
-  delay(2000);
-
-  while (sim808Serial.available()) {
-    char c = sim808Serial.read();
-    Serial.write(c);
-  }
-  Serial.println();
+        if (gsm.sendHttpRequest(apiURL, jsonPayload)) {
+            Serial.println(F("✅ POST: Data sent successfully!"));
+            lcd.printLine(1, "Data Sent OK!");
+        } else {
+            Serial.println(F("❌ POST: Data transmission FAILED. (Check IMEI and Server Logs)"));
+            lcd.printLine(1, "POST FAILED!");
+        }
+    } else {
+        Serial.println(F("⚠️ GPS: No fix. Skipping data send."));
+        lcd.printLine(1, "Acquiring GPS...");
+    }
+    
+    Serial.println(F("--- LOOP END (Wait 10s) ---"));
+    
+    delay(8000); // Wait 10 seconds before next loop cycle
 }
