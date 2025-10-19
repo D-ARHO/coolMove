@@ -12,7 +12,7 @@ from flask_login import (
 )
 
 # IMPORT THE NEW DATABASE MODELS AND CONNECTION FUNCTION
-from .models import User, Device, get_db_connection
+from models import User, Device, get_db_connection
 
 # Load credentials from the .env file (for local testing)
 load_dotenv()
