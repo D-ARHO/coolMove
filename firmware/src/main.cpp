@@ -1,35 +1,69 @@
 #include <Arduino.h>
-#include <DallasTemperature.h>
-#include <TinyGPS++.h>
-#include <OneWire.h>
 #include <SoftwareSerial.h>
-#include <ArduinoJson.h>
 
-#define TINY_GSM_MODEM_SIM808  // Tell TinyGSM you are using SIM808
-#include <TinyGsmClient.h>
+#define SIM808_RX 3  // Arduino RX <- SIM808 TX
+#define SIM808_TX 4  // Arduino TX -> SIM808 RX
 
-#define ONE_WIRE_BUS 2  // DS18B20 data pin
+SoftwareSerial sim808Serial(SIM808_RX, SIM808_TX); // RX, TX
 
-OneWire oneWire(ONE_WIRE_BUS);
-DallasTemperature sensors(&oneWire);
+// Function declarations
+void connectGPRS();
+void sendAT(String command);
 
 void setup() {
   Serial.begin(9600);
-  sensors.begin();
-  Serial.println("DS18B20 Temperature Test");
+  sim808Serial.begin(9600);
+  delay(1000);
+
+  Serial.println("CoolMove: SIM808 GPRS Test");
+  connectGPRS(); // call the GPRS test function
 }
 
 void loop() {
-  sensors.requestTemperatures(); // Request temperature from sensor
-  float tempC = sensors.getTempCByIndex(0); // Read first sensor
-  Serial.print("Temperature: ");
-  Serial.print(tempC);
-  Serial.println(" °C");
-  Serial.print("Found ");
-  Serial.print(sensors.getDeviceCount());
-  Serial.println(" device(s).");
-
-  delay(100); // Update every 1 second
+  // nothing in loop, GPRS test is in setup
 }
 
+// Function definitions
+void connectGPRS() {
+  Serial.println("Setting up GPRS...");
 
+  // 1. Check module
+  sendAT("AT");
+  sendAT("AT+CSQ");        // Signal quality
+  sendAT("AT+CREG?");      // Network registration
+
+  // 2. Configure GPRS
+  sendAT("AT+SAPBR=3,1,\"CONTYPE\",\"GPRS\"");
+  sendAT("AT+SAPBR=3,1,\"APN\",\"your_apn_here\""); // Replace with your SIM card APN
+
+  // 3. Open GPRS context
+  sendAT("AT+SAPBR=1,1");
+  delay(3000);
+  sendAT("AT+SAPBR=2,1"); // Check connection status
+
+  // 4. Test HTTP GET request
+  sendAT("AT+HTTPINIT");
+  sendAT("AT+HTTPPARA=\"CID\",1");
+  sendAT("AT+HTTPPARA=\"URL\",\"http://example.com\""); // Replace with a test URL
+  sendAT("AT+HTTPACTION=0"); // 0 = GET
+  delay(5000);
+  sendAT("AT+HTTPREAD");
+  sendAT("AT+HTTPTERM");
+
+  // 5. Close GPRS
+  sendAT("AT+SAPBR=0,1");
+
+  Serial.println("GPRS test finished.");
+}
+
+void sendAT(String command) {
+  sim808Serial.println(command);
+  Serial.print("> "); Serial.println(command);
+  delay(2000);
+
+  while (sim808Serial.available()) {
+    char c = sim808Serial.read();
+    Serial.write(c);
+  }
+  Serial.println();
+}

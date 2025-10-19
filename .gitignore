@@ -1,0 +1,16 @@
+# .gitignore file content (in the coolMove/ folder)
+
+# 1. Python Virtual Environment and Temporary Files
+# These are large and must not be uploaded.
+web/venv/
+web/__pycache__/
+web/*.pyc
+
+# 2. Secrets File
+# This file contains your database password and MUST NOT be committed.
+web/.env
+
+# 3. Development/Build Folders (Optional, but good practice)
+FIRMWARE/.pio/
+FIRMWARE/.vscode/
+FIRMWARE/build/
