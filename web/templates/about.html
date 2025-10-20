@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block title %}About Us - Kold{% endblock %}
+
+{% block content %}
+<h1 class="text-primary">About Kold Tracker</h1>
+<p class="lead">Kold Tracker is dedicated to providing real-time cold chain monitoring solutions using low-cost, reliable ESP32 and GPS technology.</p>
+<hr>
+
+<h3 class="text-info">Our Mission</h3>
+<p>To ensure the safety and integrity of perishable goods by offering precise, real-time location and temperature data, accessible from any web-enabled device.</p>
+
+<h3 class="text-info">Technology Stack</h3>
+<ul>
+    <li>**Device:** ESP32, NEO-6M GPS, DS18B20 Temperature Sensor.</li>
+    <li>**Firmware:** PlatformIO (C++) for reliable, resource-efficient data transmission.</li>
+    <li>**Web Backend:** Flask (Python) with PostgreSQL for secure data storage.</li>
+</ul>
+{% endblock %}

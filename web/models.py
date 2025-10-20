@@ -7,22 +7,20 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 # --- Database Connection Function ---
 def get_db_connection():
-    # Fetch the connection string from environment variables
     db_url = os.environ.get('DATABASE_URL')
     if not db_url:
-        return None
+        # Fallback for local testing without .env loaded
+        return None 
         
     try:
-        # Connect using the full connection string (URI)
         conn = psycopg.connect(conninfo=db_url)
         return conn
     except Exception as e:
-        # Print error but return None so routes can handle failure gracefully
         print(f"DB Connection Error: {e}")
         return None
 
 # ----------------------------------------------------------------------
-# 1. USER MODEL
+# 1. USER MODEL (Includes new create_user method for registration)
 # ----------------------------------------------------------------------
 
 class User(UserMixin):
@@ -39,11 +37,53 @@ class User(UserMixin):
     @staticmethod
     def set_password(password):
         """Hashes a plaintext password for secure storage."""
+        # bcrypt hash output is about 60 chars long, but we need extra space
+        # in the database (e.g., VARCHAR(100) or VARCHAR(255))
         return generate_password_hash(password)
 
     def check_password(self, password):
         """Verifies a plaintext password against the stored hash."""
         return check_password_hash(self.password_hash, password)
+
+    # --- NEW METHOD FOR REGISTRATION ---
+    @classmethod
+    def create_user(cls, email, password, name):
+        """Hashes password and inserts a new user record into the database."""
+        conn = get_db_connection()
+        if not conn: 
+            return False, "Database connection failed."
+
+        # 1. Hash the password
+        password_hash = cls.set_password(password)
+
+        try:
+            cur = conn.cursor()
+            # 2. Insert the new user data
+            # RETURNING ID is used to immediately get the primary key for the new User object
+            cur.execute(
+                "INSERT INTO users (email, password_hash, name) VALUES (%s, %s, %s) RETURNING id",
+                (email, password_hash, name)
+            )
+            user_id = cur.fetchone()[0] # Get the ID of the new user
+            conn.commit()
+            return True, User(id=user_id, email=email, password_hash=password_hash, name=name)
+            
+        except psycopg.errors.UniqueViolation:
+            conn.rollback()
+            return False, "User with that email already exists."
+        
+        except psycopg.errors.StringDataRightTruncation as e:
+            conn.rollback()
+            # This catches the "value too long for type character varying(150)" error
+            return False, f"Registration failed: Input data too long for database. Please check NAME or PASSWORD length. Details: {e}" 
+            
+        except Exception as e:
+            conn.rollback()
+            return False, f"An unexpected error occurred during registration. Details: {e}"
+            
+        finally:
+            if conn: conn.close()
+    # -----------------------------------
 
     @classmethod
     def get_by_id(cls, user_id):
@@ -71,27 +111,34 @@ class User(UserMixin):
 
 
 # ----------------------------------------------------------------------
-# 2. DEVICE MODEL
+# 2. DEVICE MODEL (Updated for multi-user architecture)
 # ----------------------------------------------------------------------
 
 class Device:
     """Represents a record in the 'devices' table."""
-    def __init__(self, id, user_id, device_name, unique_imei, imei_suffix):
+    def __init__(self, id, device_name, unique_imei, imei_suffix=None):
         self.id = id
-        self.user_id = user_id
         self.device_name = device_name
         self.unique_imei = unique_imei
-        self.imei_suffix = imei_suffix # The last 6 digits for display
+        # Calculate suffix if not passed (e.g., when fetched by IMEI)
+        self.imei_suffix = imei_suffix if imei_suffix else unique_imei[-6:]
         
     @classmethod
     def get_user_devices(cls, user_id):
-        """Retrieves all tracking devices registered by a specific user."""
+        """Retrieves all devices shared with a specific user."""
         conn = get_db_connection()
         if not conn: return []
         try:
             cur = conn.cursor()
-            # SQL function RIGHT(string, length) extracts the suffix
-            cur.execute("SELECT id, user_id, device_name, unique_imei, RIGHT(unique_imei, 6) AS imei_suffix FROM devices WHERE user_id = %s ORDER BY device_name", (user_id,))
+            # JOIN to the device_shares table to only get devices linked to the user
+            cur.execute("""
+                SELECT 
+                    d.id, d.device_name, d.unique_imei, RIGHT(d.unique_imei, 6) AS imei_suffix
+                FROM devices d
+                JOIN device_shares ds ON d.id = ds.device_id
+                WHERE ds.user_id = %s 
+                ORDER BY d.device_name
+            """, (user_id,))
             devices_data = cur.fetchall()
             return [cls(*data) for data in devices_data]
         finally:
@@ -99,15 +146,18 @@ class Device:
             
     @classmethod
     def get_by_id_and_user(cls, device_id, user_id):
-        """Retrieves a device ensuring it belongs to the given user."""
+        """Retrieves a device ensuring it is shared with the given user."""
         conn = get_db_connection()
         if not conn: return None
         try:
             cur = conn.cursor()
-            cur.execute(
-                "SELECT id, user_id, device_name, unique_imei, RIGHT(unique_imei, 6) FROM devices WHERE id = %s AND user_id = %s",
-                (device_id, user_id)
-            )
+            cur.execute("""
+                SELECT 
+                    d.id, d.device_name, d.unique_imei, RIGHT(d.unique_imei, 6)
+                FROM devices d
+                JOIN device_shares ds ON d.id = ds.device_id
+                WHERE d.id = %s AND ds.user_id = %s
+            """, (device_id, user_id))
             device_data = cur.fetchone()
             return cls(*device_data) if device_data else None
         finally:
@@ -121,11 +171,12 @@ class Device:
         try:
             cur = conn.cursor()
             cur.execute(
-                "SELECT id, user_id, device_name, unique_imei, RIGHT(unique_imei, 6) FROM devices WHERE unique_imei = %s",
+                "SELECT id, device_name, unique_imei FROM devices WHERE unique_imei = %s",
                 (imei,)
             )
             device_data = cur.fetchone()
-            return cls(*device_data) if device_data else None
+            # If found, return the Device object
+            return cls(device_data[0], device_data[1], device_data[2]) if device_data else None
         finally:
             if conn: conn.close()
             
@@ -152,7 +203,36 @@ class Device:
             if conn: conn.close()
             
 # ----------------------------------------------------------------------
-# 3. READING MODEL (Data Layer)
+# 3. DEVICE SHARE MODEL (NEW)
+# ----------------------------------------------------------------------
+
+class DeviceShare:
+    """Manages the relationship between a User and a Device."""
+    
+    @staticmethod
+    def link_user_to_device(user_id, device_id):
+        """Links a user to a device in the device_shares table."""
+        conn = get_db_connection()
+        if not conn: return False, "Database connection failed."
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "INSERT INTO device_shares (user_id, device_id) VALUES (%s, %s)",
+                (user_id, device_id)
+            )
+            conn.commit()
+            return True, "Device successfully linked."
+        except psycopg.IntegrityError:
+            # Handle the case where the link already exists (UNIQUE constraint failed)
+            return True, "Device was already linked to this user."
+        except Exception as e:
+            conn.rollback()
+            return False, f"Database error during linking: {e}"
+        finally:
+            if conn: conn.close()
+            
+# ----------------------------------------------------------------------
+# 4. READING MODEL (Minor change for real-time API)
 # ----------------------------------------------------------------------
 
 class Reading:

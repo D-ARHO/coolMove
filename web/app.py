@@ -1,7 +1,7 @@
 # FILE: web/app.py
 
 import os
-import json # Added for JSON dump in device_history
+import json 
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, abort
 import psycopg
 from dotenv import load_dotenv
@@ -14,34 +14,45 @@ from flask_login import (
 )
 
 # Relative import from models.py
-from models import User, Device, Reading, get_db_connection 
+# ADDED DeviceShare
+from models import User, Device, Reading, DeviceShare, get_db_connection 
 
-# Load credentials from the .env file (for local testing)
 load_dotenv()
 
 app = Flask(__name__)
-# IMPORTANT: Use FLASK_SECRET_KEY for sessions and CSRF protection
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'a-very-secret-default-key') 
 
-# --- FLASK-LOGIN SETUP ---
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login' 
 login_manager.login_message = 'Please log in to access this page.'
 
-# --- USER LOADER (REQUIRED BY FLASK-LOGIN) ---
+# --- USER LOADER ---
 @login_manager.user_loader
 def load_user(user_id):
-    """Callback function to reload the user object from the user ID stored in the session."""
     return User.get_by_id(user_id) 
 
 # ----------------------------------------------------------------------
-# 1. AUTHENTICATION ROUTES
+# 1. NEW PUBLIC/STATIC ROUTES
 # ----------------------------------------------------------------------
 
-# --- Registration Route ---
+# --- About Page (NEW) ---
+@app.route('/about')
+def about():
+    return render_template('about.html')
+
+# --- Services Page (NEW) ---
+@app.route('/services')
+def services():
+    return render_template('services.html')
+
+# ----------------------------------------------------------------------
+# 2. AUTHENTICATION ROUTES (No significant changes)
+# ----------------------------------------------------------------------
+
 @app.route('/register', methods=['GET', 'POST'])
 def register():
+    # ... (Registration logic remains the same) ...
     if current_user.is_authenticated:
         return redirect(url_for('dashboard'))
 
@@ -82,10 +93,10 @@ def register():
 
     return render_template('register.html')
 
-# --- Login Route (Main Landing Page) ---
 @app.route('/', methods=['GET', 'POST'])
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    # ... (Login logic remains the same) ...
     if current_user.is_authenticated:
         return redirect(url_for('dashboard'))
 
@@ -106,17 +117,17 @@ def login():
         
     return render_template('login.html')
 
-# --- Logout Route ---
 @app.route('/logout')
 @login_required 
 def logout():
+    # ... (Logout logic remains the same) ...
     logout_user() 
     flash('You have been logged out.', 'info')
     return redirect(url_for('login'))
 
 
 # ----------------------------------------------------------------------
-# 2. PROTECTED DASHBOARD AND DEVICE MANAGEMENT ROUTES
+# 3. PROTECTED DASHBOARD AND DEVICE MANAGEMENT ROUTES (Updated)
 # ----------------------------------------------------------------------
 
 # --- Main Dashboard (Protected) ---
@@ -125,55 +136,40 @@ def logout():
 def dashboard():
     devices = Device.get_user_devices(current_user.id)
     
-    device_data = []
-    for device in devices:
-        latest_reading = Reading.get_latest_reading(device.id)
-        
-        device_dict = device.__dict__.copy() # Use copy to avoid modifying the model object
-        device_dict['latest_reading'] = latest_reading
-        
-        device_data.append(device_dict)
+    # We now fetch latest reading data via the new API endpoint in the template
+    # This keeps the initial page load fast.
+    return render_template('dashboard.html', devices=devices, user=current_user)
 
-    return render_template('dashboard.html', devices=device_data, user=current_user)
-
-
-# --- Device Detail/History Route (New) ---
+# --- Device Detail/History Route (Map Functionality) ---
 @app.route('/device/<int:device_id>')
 @login_required
 def device_history(device_id):
-    # Retrieve the device details
     device = Device.get_by_id_and_user(device_id, current_user.id)
     if not device:
         flash("Device not found or you do not have permission to view it.", 'error')
         return redirect(url_for('dashboard'))
     
-    # Fetch the historical readings (last 50 points)
     readings = Device.get_readings(device_id, limit=50) 
+    readings.reverse() # Oldest to newest for correct route drawing
     
-    # Reverse the order so Leaflet draws the route correctly (oldest to newest)
-    readings.reverse() 
-    
-    # Create a list of dictionaries for easy JSON conversion for the map script
     route_data = [
         {'lat': r.latitude, 'lon': r.longitude, 'temp': r.temperature, 'time': r.received_at.strftime('%Y-%m-%d %H:%M:%S')}
         for r in readings
     ]
     
-    # Pass the data as a JSON string for the JavaScript side
     route_data_json = json.dumps(route_data)
 
     return render_template('device_history.html', 
-                           device=device,
-                           route_data_json=route_data_json)
+                            device=device,
+                            route_data_json=route_data_json)
 
 
-# --- Device Management Route ---
+# --- Device Management Route (Updated to handle DeviceShare) ---
 @app.route('/devices/add', methods=['GET', 'POST'])
 @login_required
 def add_device():
     if request.method == 'POST':
         device_name = request.form.get('device_name')
-        # Use the full IMEI (15 digits)
         full_imei = request.form.get('unique_imei') 
         user_id = current_user.id
         
@@ -182,31 +178,56 @@ def add_device():
             flash('Invalid device name or IMEI format. IMEI must be 15 digits.', 'error')
             return render_template('add_device.html')
 
-        # 2. Check for IMEI uniqueness
-        if Device.get_by_imei(full_imei):
-            flash(f'The IMEI suffix **{full_imei[-6:]}** is already registered.', 'warning')
-            return render_template('add_device.html')
-
+        # 2. Check if device already exists in the 'devices' table
+        device = Device.get_by_imei(full_imei)
+        
+        # --- Transaction START ---
         conn = get_db_connection()
         if not conn:
-             flash('Database connection failed.', 'error')
-             return render_template('add_device.html')
-             
+            flash('Database connection failed.', 'error')
+            return render_template('add_device.html')
         cur = conn.cursor()
+        
         try:
-            # 3. Insert the new device, linking it to the current user
-            cur.execute(
-                "INSERT INTO devices (user_id, device_name, unique_imei) VALUES (%s, %s, %s)",
-                (user_id, device_name, full_imei)
-            )
-            conn.commit()
+            # A. If device IMEI is new, create the device first.
+            if not device:
+                cur.execute(
+                    "INSERT INTO devices (device_name, unique_imei) VALUES (%s, %s) RETURNING id",
+                    (device_name, full_imei)
+                )
+                device_id = cur.fetchone()[0]
+                conn.commit() # Commit the new device creation
+                
+                # Re-fetch the device object (or just use the data)
+                device = Device(device_id, device_name, full_imei)
+
+                flash_message = f'New Device "{device_name}" successfully registered!'
+                
+            # B. If device IMEI already exists, use its ID.
+            else:
+                # Update the name in case the original registering user made a typo/wanted to change it
+                cur.execute(
+                    "UPDATE devices SET device_name = %s WHERE id = %s",
+                    (device_name, device.id)
+                )
+                device_id = device.id
+                conn.commit()
+
+                flash_message = f'Device "{device_name}" (IMEI {device.imei_suffix}) was already registered by someone else. You have now been linked to it.'
+
+            # 3. Link the current user to the device (DeviceShare)
+            success, link_message = DeviceShare.link_user_to_device(user_id, device_id)
             
-            flash(f'Device "{device_name}" successfully registered!', 'success')
+            if success:
+                flash(flash_message, 'success')
+            else:
+                flash(f'Device registered, but linking failed: {link_message}', 'warning')
+                
             return redirect(url_for('dashboard'))
             
         except Exception as e:
             conn.rollback()
-            flash(f'Database error during device registration: {e}', 'error')
+            flash(f'Database error during device linking: {e}', 'error')
         finally:
             if conn: conn.close()
 
@@ -214,17 +235,43 @@ def add_device():
 
 
 # ----------------------------------------------------------------------
-# 3. DEVICE API ROUTE (Receives Data from Firmware - NO LOGIN REQUIRED)
+# 4. API ROUTES
 # ----------------------------------------------------------------------
 
+# --- API for Real-Time Dashboard Refresh (NEW) ---
+@app.route('/api/latest/<int:device_id>')
+@login_required # Protects the real-time API endpoint
+def api_latest_reading(device_id):
+    # 1. Ensure the device is linked to the current user
+    device = Device.get_by_id_and_user(device_id, current_user.id)
+    if not device:
+        return jsonify({"error": "Device not authorized"}), 403
+
+    # 2. Fetch the latest reading
+    reading = Reading.get_latest_reading(device_id)
+
+    if reading:
+        data = {
+            'temp': round(reading.temperature, 1),
+            'lat': reading.latitude,
+            'lon': reading.longitude,
+            'time': reading.received_at.strftime('%Y-%m-%d %H:%M:%S'),
+            'status': 'OK'
+        }
+        return jsonify(data), 200
+    else:
+        return jsonify({"status": "NoData", "message": "No readings found for this device"}), 200
+
+
+# --- API for Firmware Data (No Login Required) ---
 @app.route('/api/data', methods=['POST'])
 def receive_data():
+    # ... (Data receiving logic remains the same) ...
     if not request.is_json:
         return jsonify({"message": "Expected JSON payload"}), 415
 
     data = request.get_json()
     
-    # 1. Basic validation and extraction
     try:
         imei = data['imei']
         lat = float(data['lat'])
@@ -245,7 +292,7 @@ def receive_data():
 
 # --- Run the App ---
 if __name__ == '__main__':
-    # Logic to handle local environment variables if DATABASE_URL is not explicitly set
+    # ... (App run logic remains the same) ...
     if os.environ.get('DATABASE_URL') is None:
         try:
             db_url = f"postgresql://{os.environ.get('DB_USER')}:{os.environ.get('DB_PASSWORD')}@{os.environ.get('DB_HOST')}/{os.environ.get('DB_NAME')}"

@@ -1,56 +1,43 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard | {{ user.name }}{% endblock %}
+{% block title %}Live Dashboard | {{ user.name }}{% endblock %}
 
 {% block content %}
-<h1 class="mb-4">Welcome Back, {{ user.name }}! 👋</h1>
+<h1 class="mb-4 text-primary">Live Fleet Dashboard 🌎</h1>
+<p class="text-muted">Real-time status of your linked Kold trackers.</p>
 
 <hr>
 
-<div class="row">
-    <div class="col-12 mb-3 d-flex justify-content-between align-items-center">
-        <h2 class="h4 mb-0">Your Registered Kold Trackers</h2>
-        <a href="{{ url_for('add_device') }}" class="btn btn-info">
-            <i class="fas fa-plus-circle"></i> Register New Device
+<div class="row mb-4">
+    <div class="col-md-8">
+        <input type="text" id="deviceSearch" class="form-control" placeholder="Search devices by name or IMEI suffix..." onkeyup="filterDevices()">
+    </div>
+    <div class="col-md-4 d-flex justify-content-end">
+        <a href="{{ url_for('add_device') }}" class="btn btn-info w-100">
+            <i class="fas fa-plus-circle"></i> Register/Share Device
         </a>
     </div>
+</div>
 
+<div class="row" id="deviceContainer">
     {% if devices %}
         {% for device in devices %}
-        <div class="col-md-6 col-lg-4 mb-4">
-            <div class="card shadow-sm h-100">
-                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">{{ device.device_name }}</h5>
-                    <small class="badge bg-light text-dark">IMEI Suffix: **{{ device.imei_suffix }}**</small>
+        <div class="col-md-6 col-lg-4 mb-4 device-card" 
+             data-device-id="{{ device.id }}" 
+             data-search-term="{{ device.device_name | lower }} {{ device.imei_suffix }}">
+            <div class="card shadow-lg h-100 border-start border-5 border-primary">
+                <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0 text-primary"><i class="fas fa-map-marker-alt"></i> {{ device.device_name }}</h5>
+                    <small class="badge bg-secondary text-white">IMEI: {{ device.imei_suffix }}</small>
                 </div>
-                <div class="card-body d-flex flex-column">
-                    {% set reading = device.latest_reading %}
-                    
-                    <div class="flex-grow-1">
-                        {% if reading %}
-                            <div class="mb-3 text-center">
-                                <p class="mb-0 text-muted">Latest Temperature:</p>
-                                <h1 class="display-3 fw-bold {% if reading.temperature > 30.0 %}text-danger{% else %}text-info{% endif %}">
-                                    {{ "%.1f" | format(reading.temperature) }}°C
-                                </h1>
-                            </div>
-
-                            <hr>
-                            <div class="text-center">
-                                <p class="mb-1 text-muted">Last Update (Server Time):</p>
-                                <p class="fw-bold text-success">{{ reading.received_at.strftime('%Y-%m-%d %H:%M:%S') }}</p>
-                                <p class="mb-0 small text-muted">Lat: {{ "%.4f" | format(reading.latitude) }}, Lon: {{ "%.4f" | format(reading.longitude) }}</p>
-                            </div>
-                        {% else %}
-                            <p class="alert alert-warning text-center">No data readings received for this device yet.</p>
-                        {% endif %}
-                    </div>
-                    
-                    <div class="mt-3">
-                        <a href="{{ url_for('device_history', device_id=device.id) }}" class="btn btn-outline-primary w-100">
-                            View History & Route Map
-                        </a>
-                    </div>
+                <div class="card-body d-flex flex-column" id="data-{{ device.id }}">
+                    <p class="text-center text-muted"><i class="fas fa-sync fa-spin"></i> Loading live data...</p>
+                </div>
+                
+                <div class="card-footer bg-white">
+                     <a href="{{ url_for('device_history', device_id=device.id) }}" class="btn btn-outline-primary w-100">
+                         <i class="fas fa-route"></i> View History & Route Map
+                     </a>
                 </div>
             </div>
         </div>
@@ -58,9 +45,88 @@
     {% else %}
         <div class="col-12">
             <div class="alert alert-warning text-center">
-                You don't have any devices registered yet. Click the button above to add one!
+                You don't have any devices registered yet. Click the 'Register/Share Device' button to add one!
             </div>
         </div>
     {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // --- Device Search/Filter ---
+    function filterDevices() {
+        const input = document.getElementById('deviceSearch').value.toLowerCase();
+        const cards = document.querySelectorAll('.device-card');
+        
+        cards.forEach(card => {
+            const searchTerm = card.getAttribute('data-search-term');
+            if (searchTerm.includes(input)) {
+                card.style.display = '';
+            } else {
+                card.style.display = 'none';
+            }
+        });
+    }
+
+    // --- Live Data Refresh ---
+    function updateDeviceData(deviceId) {
+        const dataContainer = document.getElementById('data-' + deviceId);
+        
+        fetch(`{{ url_for('api_latest_reading', device_id=0) }}`.replace('0', deviceId))
+            .then(response => response.json())
+            .then(data => {
+                let htmlContent;
+                if (data.status === 'OK') {
+                    // Determine status color/icon
+                    const isError = data.temp === -999.0;
+                    const isHot = data.temp > 30.0;
+                    const tempClass = isError ? 'text-danger' : (isHot ? 'text-warning' : 'text-success');
+                    const tempDisplay = isError ? 'Sensor Failure' : `${data.temp.toFixed(1)}°C`;
+                    const locationIcon = isError ? 'fas fa-unlink' : 'fas fa-location-arrow';
+                    const locationText = isError ? 'GPS No Fix' : `Lat: ${data.lat.toFixed(4)}, Lon: ${data.lon.toFixed(4)}`;
+
+                    htmlContent = `
+                        <div class="flex-grow-1 text-center">
+                            <p class="mb-0 text-muted">Latest Temperature:</p>
+                            <h1 class="display-3 fw-bold ${tempClass}">
+                                ${tempDisplay}
+                            </h1>
+                        </div>
+                        <hr>
+                        <div class="text-center">
+                            <p class="mb-1 text-muted">Last Update (Server Time):</p>
+                            <p class="fw-bold text-primary">${data.time}</p>
+                            <p class="mb-0 small text-muted"><i class="${locationIcon}"></i> ${locationText}</p>
+                        </div>
+                    `;
+                } else {
+                    htmlContent = `
+                        <div class="alert alert-warning text-center">
+                            ${data.message || "No data received yet."}
+                        </div>
+                    `;
+                }
+                dataContainer.innerHTML = htmlContent;
+            })
+            .catch(error => {
+                dataContainer.innerHTML = `<p class="alert alert-danger text-center">Connection Error.</p>`;
+                console.error('Error fetching data for device ' + deviceId, error);
+            });
+    }
+
+    function refreshAllDevices() {
+        const deviceCards = document.querySelectorAll('.device-card');
+        deviceCards.forEach(card => {
+            const deviceId = card.getAttribute('data-device-id');
+            updateDeviceData(deviceId);
+        });
+    }
+
+    // Run the refresh function immediately on load
+    document.addEventListener('DOMContentLoaded', refreshAllDevices);
+
+    // Set an interval to refresh data every 10 seconds (adjust as needed)
+    setInterval(refreshAllDevices, 10000); 
+</script>
 {% endblock %}

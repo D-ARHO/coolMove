@@ -14,8 +14,8 @@ const char* WIFI_SSID = "DARHO";       // Your Wi-Fi SSID
 const char* WIFI_PASS = "12345678";   // Your Wi-Fi Password
 
 // Reverting to HTTP URL. Redirects must be handled by Esp32Module.cpp.
-// const String API_URL = "https://coolmove-dashboard.onrender.com/api/data";
-const String API_URL = "https://webhook.site/6eb4dbb2-700a-4656-8d4f-8c56d4d5ea7f";
+const String API_URL = "https://coolmove-dashboard.onrender.com/api/data";
+// const String API_URL = "https://webhook.site/6eb4dbb2-700a-4656-8d4f-8c56d4d5ea7f";
 
 // --- ERROR VALUES (Web App interprets these as sensor failure) ---
 const float ERROR_LAT = -999.000;
@@ -145,5 +145,5 @@ void loop() {
         Serial.println("❌ POST: Data transmission FAILED. Retrying in next loop.");
     }
 
-    delay(10000); // 10 seconds delay between sending attempts
+    delay(5000); // 10 seconds delay between sending attempts
 }

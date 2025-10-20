@@ -11,16 +11,18 @@
             crossorigin=""></script>
     <style>
         #route-map { height: 600px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        .map-start-icon { background-color: transparent !important; border: none; }
+        .map-end-icon { background-color: transparent !important; border: none; }
     </style>
 {% endblock %}
 
 {% block content %}
 <h1 class="mb-4">Historical Route: <span class="text-primary">{{ device.device_name }}</span></h1>
-<p class="text-muted">Viewing the last 50 data points received.</p>
+<p class="text-muted">Viewing the last 50 data points received. Oldest to newest route.</p>
 
 <div class="card shadow mb-4">
     <div class="card-header bg-light">
-        <h5 class="mb-0"><i class="fas fa-route"></i> Tracking Map</h5>
+        <h5 class="mb-0"><i class="fas fa-route text-primary"></i> Tracking Map</h5>
     </div>
     <div class="card-body">
         
@@ -42,7 +44,6 @@
 
 <script>
     document.addEventListener('DOMContentLoaded', function() {
-        // Data is passed as a JSON string from Flask, and parsed safely here in JavaScript
         const routeData = JSON.parse('{{ route_data_json | safe }}');
 
         if (routeData.length > 0) {
@@ -61,7 +62,7 @@
                 </div>
                 <div class="col-md-4">
                     <p class="mb-0 text-muted">Latest Time</p>
-                    <h4 class="fw-bold">${endPoint.time}</h4>
+                    <h4 class="fw-bold text-primary">${endPoint.time}</h4>
                 </div>
             `;
             document.getElementById('data-summary').innerHTML = summaryHtml;
@@ -82,21 +83,21 @@
             L.marker([startPoint.lat, startPoint.lon], {
                 icon: L.divIcon({
                     className: 'map-start-icon', 
-                    html: '<span class="fw-bold text-white bg-success px-2 py-1 rounded shadow-sm">START</span>', 
-                    iconSize: [60, 20]
+                    html: '<span class="fw-bold text-white bg-success px-2 py-1 rounded shadow-sm"><i class="fas fa-flag"></i> START</span>', 
+                    iconSize: [80, 20]
                 })
             }).addTo(map)
-              .bindPopup(\`<b>Route Start</b><br>Temp: \${startPoint.temp.toFixed(1)}°C<br>Time: \${startPoint.time}\`);
+              .bindPopup(`<b>Route Start</b><br>Temp: ${startPoint.temp.toFixed(1)}°C<br>Time: ${startPoint.time}`);
 
             // 5. End Marker (Current Location - Red)
             L.marker([endPoint.lat, endPoint.lon], {
                 icon: L.divIcon({
                     className: 'map-end-icon',
-                    html: '<span class="fw-bold text-white bg-danger px-2 py-1 rounded shadow-sm">NOW</span>',
-                    iconSize: [40, 20]
+                    html: '<span class="fw-bold text-white bg-danger px-2 py-1 rounded shadow-sm"><i class="fas fa-truck"></i> LIVE</span>',
+                    iconSize: [60, 20]
                 })
             }).addTo(map)
-              .bindPopup(\`<b>Current Position</b><br>Temp: \${endPoint.temp.toFixed(1)}°C<br>Time: \${endPoint.time}\`)
+              .bindPopup(`<b>Current Position</b><br>Temp: ${endPoint.temp.toFixed(1)}°C<br>Time: ${endPoint.time}`)
               .openPopup();
             
             // Adjust map view to fit the entire route

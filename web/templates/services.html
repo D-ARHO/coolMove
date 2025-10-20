@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}Services - Kold{% endblock %}
+
+{% block content %}
+<h1 class="text-primary">Our Services</h1>
+<p class="lead">We offer comprehensive monitoring features to keep your fleet safe and compliant.</p>
+<hr>
+
+<div class="row">
+    <div class="col-md-4 mb-4">
+        <div class="card shadow h-100">
+            <div class="card-body">
+                <h4 class="card-title text-info"><i class="fas fa-truck me-2"></i> Real-Time Tracking</h4>
+                <p class="card-text">View the live location and status of all your registered devices on an interactive map, updating every 10 seconds.</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-4">
+        <div class="card shadow h-100">
+            <div class="card-body">
+                <h4 class="card-title text-info"><i class="fas fa-share-alt me-2"></i> Multi-User Sharing</h4>
+                <p class="card-text">Securely share access to a single device (IMEI) across multiple user accounts for team collaboration.</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-4">
+        <div class="card shadow h-100">
+            <div class="card-body">
+                <h4 class="card-title text-info"><i class="fas fa-history me-2"></i> Route & History Mapping</h4>
+                <p class="card-text">Access detailed historical routes and temperature logs for compliance and performance analysis.</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
