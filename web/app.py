@@ -14,7 +14,7 @@ from flask_login import (
 )
 
 # Relative import from models.py
-from .models import User, Device, Reading, get_db_connection 
+from models import User, Device, Reading, get_db_connection 
 
 # Load credentials from the .env file (for local testing)
 load_dotenv()

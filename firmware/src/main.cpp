@@ -1,109 +1,76 @@
-#include <SoftwareSerial.h>
-#include "GpsModule.h" // Assuming this is correct
-#include "GsmModule.h"
-#include "Temperature.h" // Assuming this is correct
-#include "LcdDisplay.h" // Assuming this is correct
+#include <OneWire.h>
+#include <DallasTemperature.h>
 
-// ********************************************
-// ⚠️ IMPORTANT: UPDATE THIS LINE 
-// This IMEI must be registered to a device in your PostgreSQL database
-// ********************************************
-const char* DEVICE_IMEI = "123456789012345"; 
+// Data wire is connected to Arduino digital pin 2
+#define ONE_WIRE_BUS 2
 
-// --- PIN & CONFIG DEFINITIONS ---
-#define RX_GSM 10 
-#define TX_GSM 11 
-#define TEMP_PIN 2 
-#define LCD_ADDR 0x23 
+// Setup a one-wire instance to communicate with any OneWire device
+OneWire oneWire(ONE_WIRE_BUS);
 
-// --- OBJECT INSTANTIATION ---
-SoftwareSerial gsmSerial(RX_GSM, TX_GSM);
+// Pass our oneWire reference to Dallas Temperature sensor 
+DallasTemperature sensors(&oneWire);
 
-GpsModule gps(gsmSerial); 
-GsmModule gsm(gsmSerial); 
+// Variable to store the device address (if found)
+DeviceAddress tempDeviceAddress;
 
-TemperatureSensor thermometer(TEMP_PIN);
-LcdDisplay lcd(LCD_ADDR, 16, 2); 
+void setup(void) {
+  Serial.begin(9600);
+  Serial.println("DS18B20 Test Sketch");
 
-void setup() {
-    Serial.begin(9600);
-    Serial.println(F("\n===================================="));
-    Serial.println(F("     CoolMove Tracker Initialized     "));
-    Serial.println(F("===================================="));
-    
-    // Initialize LCD
-    lcd.begin();
-    lcd.printLine(0, "Tracker Start...");
-    
-    // Initialize Temperature Sensor
-    thermometer.begin();
-    
-    // Initialize SIM808 module's serial port
-    gsmSerial.begin(9600);
-    delay(1000);
-    
-    // Initialize GPS 
-    gps.begin(); 
-    
-    // Initialize GSM (connect to GPRS)
-    if (gsm.begin()) {
-        String ip = gsm.getIpAddress();
-        Serial.print(F("✅ GPRS: Connected. IP: ")); 
-        Serial.println(ip);
-        lcd.printLine(1, "GPRS OK | " + ip);
-    } else {
-        Serial.println(F("⚠️ GPRS: Setup failed. Will attempt data transmission."));
-        lcd.printLine(1, "GPRS Fail (Retry)");
+  // Start the library
+  sensors.begin();
+
+  // Locate devices on the bus
+  Serial.print("Locating devices...");
+  Serial.print("Found ");
+  Serial.print(sensors.getDeviceCount(), DEC);
+  Serial.println(" device(s).");
+
+  // Check if a device was found
+  if (sensors.getDeviceCount() == 0) {
+    Serial.println("\n--- STATUS: FAILED ---");
+    Serial.println("No DS18B20 sensor found! Check wiring and 4.7k resistor.");
+    return; // Stop here if no sensor is found
+  }
+
+  // Get the address of the first device on the bus
+  if (sensors.getAddress(tempDeviceAddress, 0)) {
+    Serial.println("\n--- STATUS: DETECTED ---");
+    Serial.print("Device Address: ");
+    for (uint8_t i = 0; i < 8; i++) {
+      // Print the address in hexadecimal format
+      Serial.print(tempDeviceAddress[i], HEX);
+      Serial.print(" ");
     }
+    Serial.println();
+  } else {
+    Serial.println("Could not find a valid address.");
+  }
 }
 
-void loop() {
-    Serial.println(F("\n--- LOOP START ---"));
-    
-    // 1. Get GPS Data
-    GpsData location = gps.getCoordinates(); 
-    
-    // 2. Get Temperature Data
-    float tempC = thermometer.readCelsius();
-    
-    // --- 3. Display Data Summary ---
-    Serial.print(F("[DATA] Temp: ")); Serial.print(tempC); Serial.println(F(" C"));
-    
-    // LCD Output
-    lcd.printLine(0, "T:" + String(tempC, 1) + "C | GPS: " + (location.fix ? "Y" : "N"));
-    
-    // --- 4. COMPILE AND SEND DATA ---
-    if (location.fix) { 
-        Serial.print(F("[DATA] GPS Fix OK. Lat=")); Serial.print(location.latitude, 4);
-        Serial.print(F(", Lon=")); Serial.println(location.longitude, 4);
-        
-        // Compile JSON Payload with IMEI, Lat, Lon, and Temp
-        String jsonPayload = "{";
-        jsonPayload += F("\"imei\":\""); jsonPayload += DEVICE_IMEI; jsonPayload += F("\","); 
-        jsonPayload += F("\"lat\":"); jsonPayload += String(location.latitude, 4); jsonPayload += F(",");
-        jsonPayload += F("\"lon\":"); jsonPayload += String(location.longitude, 4); jsonPayload += F(",");
-        jsonPayload += F("\"temp\":"); jsonPayload += String(tempC, 2);
-        jsonPayload += F("}");
+void loop(void) {
+  // Request temperature conversion from all devices on the bus
+  sensors.requestTemperatures(); 
 
-        // The target API endpoint on your server
-        // String apiURL = "http://webhook.site/6eb4dbb2-700a-4656-8d4f-8c56d4d5ea7f"; // Use your IP!
-        String apiURL = "http://172.17.26.216:5000/api/data"; // Use your IP!
+  // Read the temperature from the device
+  float tempC = sensors.getTempCByIndex(0);
+  float tempF = sensors.getTempFByIndex(0);
 
-        Serial.print(F("TX: Payload: ")); Serial.println(jsonPayload); 
+  // Check for a valid reading (CRC error, etc.)
+  if (tempC == DEVICE_DISCONNECTED_C) {
+    Serial.println("--- STATUS: FAILED ---");
+    Serial.println("Error reading temperature! Check connection stability.");
+  } else {
+    Serial.print("Temperature: ");
+    Serial.print(tempC);
+    Serial.print(" °C  |  ");
+    Serial.print(tempF);
+    Serial.println(" °F");
+  }
 
-        if (gsm.sendHttpRequest(apiURL, jsonPayload)) {
-            Serial.println(F("✅ POST: Data sent successfully!"));
-            lcd.printLine(1, "Data Sent OK!");
-        } else {
-            Serial.println(F("❌ POST: Data transmission FAILED. (Check IMEI and Server Logs)"));
-            lcd.printLine(1, "POST FAILED!");
-        }
-    } else {
-        Serial.println(F("⚠️ GPS: No fix. Skipping data send."));
-        lcd.printLine(1, "Acquiring GPS...");
-    }
-    
-    Serial.println(F("--- LOOP END (Wait 10s) ---"));
-    
-    delay(8000); // Wait 10 seconds before next loop cycle
+  // A working sensor should show a realistic ambient temperature.
+  // Perform the "Flick Test" now: Briefly touch the sensor with your finger 
+  // and watch the temperature rise!
+  
+  delay(2000); // Wait 2 seconds before the next reading
 }
