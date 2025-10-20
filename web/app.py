@@ -72,7 +72,7 @@ def register():
             
             new_user = User(new_user_id, email, password_hash, name)
             login_user(new_user)
-            flash('Registration successful! Welcome to CoolMove.', 'success')
+            flash('Registration successful! Welcome to Kold.', 'success')
             return redirect(url_for('dashboard'))
         except Exception as e:
             conn.rollback()
