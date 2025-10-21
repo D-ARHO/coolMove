@@ -27,7 +27,7 @@ const float ERROR_TEMP = -999.00;
 #define GPS_RX_PIN 16 
 #define GPS_TX_PIN 17 
 #define TEMP_PIN 4    
-#define LCD_ADDR 0x25 
+#define LCD_ADDR 0x23 
 
 // --- OBJECT INSTANTIATION ---
 HardwareSerial gpsSerial(2); 
